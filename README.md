@@ -1,3 +1,5 @@
-# libsignal-protocol-wasm
+# key-x-wasm
 
-WASM bindings for the Signal Protocol
+WASM bindings for KeyX. Store and share keys using the Signal Protocal.
+
+This is just for testing, use at own risk.

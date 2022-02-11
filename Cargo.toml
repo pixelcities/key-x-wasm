@@ -1,5 +1,5 @@
 [package]
-name = "libsignal-protocol-wasm"
+name = "key-x-wasm"
 version = "0.1.0"
 authors = ["PixelCities"]
 edition = "2018"
@@ -17,7 +17,11 @@ wee_alloc = { version = "0.4.5", optional = true }
 js-sys = "0.3.55"
 uuid = { version = "0.8.2", features = [ "v4", "wasm-bindgen" ]}
 
+aes-gcm-siv = "0.10.1"
+argon2 = "0.3"
 rand = "0.7.3"
+base64 = "0.13"
+
 libsignal-protocol = { path = "./libsignal-client/rust/protocol" }
 
 [dev-dependencies]
