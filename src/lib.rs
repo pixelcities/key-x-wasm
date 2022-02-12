@@ -21,8 +21,7 @@ use aes_gcm_siv::aead::{Aead, NewAead};
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
 pub struct KeyXInner {
-    root_key: Output,
-    passphrase: Output,
+    root_key: RefCell<Option<Output>>,
     keys: RefCell<HashMap<String, String>>
 }
 
@@ -40,40 +39,46 @@ fn gen_nonce<T>(csprng: &mut T) -> [u8; 12] where T: CryptoRng + Rng, {
 #[wasm_bindgen]
 impl KeyX {
     #[wasm_bindgen(constructor)]
-    pub fn new(email: String, passphrase: String) -> KeyX {
+    pub fn new() -> KeyX {
         console_error_panic_hook::set_once();
 
-        // derive root key
-        let root_key = {
-            let params = Params::new(4096, 8, 1, Some(32)).unwrap();
-            let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-            let salt = SaltString::b64_encode(&email.as_bytes()).unwrap();
-            argon2.hash_password(passphrase.as_bytes(), &salt).unwrap().hash.unwrap()
-        };
-
-        let hashed_passphrase = {
-            let params = Params::new(1024, 1, 1, Some(32)).unwrap();
-            let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-
-            let salt =  SaltString::b64_encode(&passphrase.as_bytes()).unwrap();
-            argon2.hash_password(root_key.as_bytes(), &salt).unwrap().hash.unwrap()
-        };
-
         KeyX { inner: Arc::new(KeyXInner {
-            root_key: root_key,
-            passphrase: hashed_passphrase,
+            root_key: RefCell::new(None),
             keys: RefCell::new(HashMap::new())
         })}
     }
 
-    // Because the root key is based on both the email and passphrase the
-    // hash will change when either of the two is mutated. Take care.
-    pub fn get_hashed_passphrase(&self) -> String {
-        base64::encode(self.inner.passphrase.as_bytes())
+    pub fn open_sesame(&self, email: String, passphrase: String) -> String {
+        // Derive root key
+        let root_key = {
+            let params = Params::new(4096, 4, 1, Some(32)).unwrap(); // ~ 1250ms
+            let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+            let salt = SaltString::b64_encode(&email.as_bytes()).unwrap();
+            Some(argon2.hash_password(passphrase.as_bytes(), &salt).unwrap().hash.unwrap())
+        };
+
+        self.inner.root_key.replace(root_key);
+
+        // Because the root key is based on both the email and passphrase the
+        // hash will change when either of the two is mutated. Take care.
+        let hashed_passphrase = {
+            let params = Params::new(512, 1, 1, Some(32)).unwrap(); // ~ <100ms
+            let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+
+            let salt =  SaltString::b64_encode(&passphrase.as_bytes()).unwrap();
+            argon2.hash_password(self.inner.root_key.borrow().unwrap().as_bytes(), &salt).unwrap().hash.unwrap()
+        };
+
+        base64::encode(hashed_passphrase.as_bytes())
+    }
+
+    pub fn is_locked(&self) -> bool {
+        let root_key = self.inner.root_key.borrow();
+        root_key.is_none()
     }
 
     pub fn get_key(&self, id: String) -> String {
-        match self.inner.keys.borrow_mut().get(&id) {
+        match self.inner.keys.borrow().get(&id) {
             Some(key) => {
                 self.decrypt_key(key.clone())
             },
@@ -84,7 +89,8 @@ impl KeyX {
     pub fn encrypt_key(&self, plaintext: String) -> String {
         let mut csprng = OsRng;
 
-        let key = Key::from_slice(self.inner.root_key.as_bytes());
+        let root_key = self.inner.root_key.borrow().unwrap();
+        let key = Key::from_slice(root_key.as_bytes());
         let cipher = Aes256GcmSiv::new(key);
         let nonce = gen_nonce(&mut csprng);
 
@@ -98,7 +104,8 @@ impl KeyX {
         let nonce: Vec<u8> = base64::decode(split[0]).unwrap();
         let bytes = base64::decode(split[1]).unwrap();
 
-        let key = Key::from_slice(self.inner.root_key.as_bytes());
+        let root_key = self.inner.root_key.borrow().unwrap();
+        let key = Key::from_slice(root_key.as_bytes());
         let cipher = Aes256GcmSiv::new(key);
 
         let plaintext = cipher.decrypt(Nonce::from_slice(&nonce), bytes.as_ref()).expect("decryption failure!");
@@ -134,10 +141,11 @@ mod tests {
 
     #[test]
     fn test_key_x() {
-        let key_x = KeyX::new("hello@pixelcities.io".to_string(), "passphrase".to_string());
+        let key_x = KeyX::new();
+        key_x.open_sesame("hello@pixelcities.io".to_string(), "passphrase".to_string());
 
         let key = key_x.encrypt_key("secret".to_string());
-        let output = "UHx+prKUdklUiBEx:ueoVH1ZUwHV9CAuXGD8GzWZ5KzWcPA==".to_string();
+        let output = "Bas52beOECLMh+sr:ER+eJfhHdtE6qkUhrDlVfeiOqkoevw==".to_string();
         let decrypted = key_x.decrypt_key(output);
 
         assert_eq!("secret", decrypted);
