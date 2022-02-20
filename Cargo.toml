@@ -12,17 +12,25 @@ default = ["console_error_panic_hook"]
 
 [dependencies]
 wasm-bindgen = { version = "0.2.63" }
+wasm-bindgen-futures = "0.4.29"
+futures-channel-preview = "0.3.0-alpha.18"
 console_error_panic_hook = { version = "0.1.6", optional = true }
 wee_alloc = { version = "0.4.5", optional = true }
 js-sys = "0.3.55"
+web-sys = { version = "0.3.4", features = [ "console", "Headers", "Request", "RequestInit", "RequestCredentials", "RequestMode", "Response", "Window" ]}
 uuid = { version = "0.8.2", features = [ "v4", "wasm-bindgen" ]}
 
 aes-gcm-siv = "0.10.1"
 argon2 = "0.3"
-rand = "0.7.3"
+rand = { version = "0.7.3", features = ["wasm-bindgen"] }
 base64 = "0.13"
+hex = "0.4.3"
 
 libsignal-protocol = { path = "./libsignal-client/rust/protocol" }
+
+[dependencies.getrandom]
+version = "0.2.4"
+features = [ "js" ]
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.13"
