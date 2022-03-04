@@ -5,6 +5,7 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 mod keystore;
 mod protocol;
 mod crypto;
+mod storage;
 
 pub use {
     keystore::KeyStore,

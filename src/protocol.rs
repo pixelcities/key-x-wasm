@@ -6,13 +6,13 @@ use std::sync::Arc;
 use std::cell::RefCell;
 
 use libsignal_protocol::*;
-use rand::rngs::OsRng;
 
-use crate::crypto::*;
+// use crate::crypto::*;
+use crate::storage::SyncableStore;
 
 pub struct ProtocolInner {
-    secret_key: String,
-    store: RefCell<Option<InMemSignalProtocolStore>>
+    secret_key: RefCell<Option<String>>,
+    store: RefCell<Option<SyncableStore>>
 }
 
 #[wasm_bindgen]
@@ -23,29 +23,31 @@ pub struct Protocol {
 #[wasm_bindgen]
 impl Protocol {
     #[wasm_bindgen(constructor)]
-    pub fn new(secret_key: String) -> Protocol {
+    pub fn new() -> Protocol {
         console_error_panic_hook::set_once();
 
         Protocol {
             inner: Arc::new(ProtocolInner {
-                secret_key: secret_key,
+                secret_key: RefCell::new(None),
                 store: RefCell::new(None)
             })
         }
     }
 
-    // TODO: init function with secret_key
+    pub fn init(&self, secret_key: String) -> () {
+        let store = SyncableStore::new(&secret_key);
+
+        self.inner.secret_key.replace(Some(secret_key));
+        self.inner.store.replace(Some(store));
+    }
 
     pub fn register(&self, user_id: String) -> () {
-        let mut csprng = OsRng;
-
-        let identity_key = IdentityKeyPair::generate(&mut csprng);
-
-        let store = InMemSignalProtocolStore::new(identity_key, 1).unwrap();
+        let store = SyncableStore::register();
 
         self.inner.store.replace(Some(store));
         let address = ProtocolAddress::new(user_id.to_owned(), 1);
         println!("{:?}", address);
+
     }
 }
 
@@ -56,7 +58,7 @@ mod tests {
     #[test]
     fn test_protocol() {
         let protocol = Protocol::new();
-        protocol.register("e3e82154-1a7b-427f-a537-954770fd7cc6");
+        protocol.register("e3e82154-1a7b-427f-a537-954770fd7cc6".to_string());
 
         assert!(true);
     }
