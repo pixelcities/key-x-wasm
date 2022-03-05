@@ -8,15 +8,15 @@ use std::sync::Arc;
 use std::cell::RefCell;
 use std::collections::hash_map::HashMap;
 
-use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::*;
-use web_sys::{console, Request, RequestInit, RequestCredentials, RequestMode, Response};
+use web_sys::console;
 use futures_channel::oneshot;
 use js_sys::{Promise};
 
 use rand::rngs::OsRng;
 use argon2::{password_hash::{PasswordHasher, SaltString, Output}, Argon2, Params, Algorithm, Version};
 
+use crate::utils::*;
 use crate::crypto::*;
 
 pub struct KeyStoreInner {
@@ -77,22 +77,7 @@ impl KeyStore {
 
         // Get all the keys
         spawn_local(async move {
-            let mut opts = RequestInit::new();
-            opts.method("GET");
-            opts.mode(RequestMode::Cors);
-            opts.credentials(RequestCredentials::Include);
-
-            let request = Request::new_with_str_and_init("http://localhost:5000/keys", &opts).unwrap();
-
-            request
-                .headers()
-                .set("Accept", "application/json").unwrap();
-
-            let window = web_sys::window().unwrap();
-            let resp_value = JsFuture::from(window.fetch_with_request(&request)).await.unwrap();
-
-            let resp: Response = resp_value.dyn_into().unwrap();
-            let json = JsFuture::from(resp.json().unwrap()).await.unwrap();
+            let json = request("GET".to_string(), "http://localhost:5000/keys".to_string(), None).await;
 
             for key in js_sys::try_iter(&json).unwrap().unwrap() {
                 let obj = key.unwrap();
@@ -104,22 +89,7 @@ impl KeyStore {
 
             // And also the manifest
             spawn_local(async move {
-                let mut opts = RequestInit::new();
-                opts.method("GET");
-                opts.mode(RequestMode::Cors);
-                opts.credentials(RequestCredentials::Include);
-
-                let request = Request::new_with_str_and_init("http://localhost:5000/keys/manifest", &opts).unwrap();
-
-                request
-                    .headers()
-                    .set("Accept", "application/json").unwrap();
-
-                let window = web_sys::window().unwrap();
-                let resp_value = JsFuture::from(window.fetch_with_request(&request)).await.unwrap();
-
-                let resp: Response = resp_value.dyn_into().unwrap();
-                let json = JsFuture::from(resp.json().unwrap()).await.unwrap();
+                let json = request("GET".to_string(), "http://localhost:5000/keys/manifest".to_string(), None).await;
                 let manifest = js_sys::Reflect::get(&json, &"manifest".into()).unwrap();
 
                 for entry in js_sys::Object::entries(&manifest.into()).iter() {
@@ -192,20 +162,7 @@ impl KeyStore {
 
             let body = format!("{{\"manifest\": {{ {} }} }}", entries.join(","));
 
-            let mut opts = RequestInit::new();
-            opts.method("PUT");
-            opts.mode(RequestMode::Cors);
-            opts.credentials(RequestCredentials::Include);
-            opts.body(Some(&body.into()));
-
-            let request = Request::new_with_str_and_init("http://localhost:5000/keys/manifest", &opts).unwrap();
-
-            request
-                .headers()
-                .set("Content-Type", "application/json").unwrap();
-
-            let window = web_sys::window().unwrap();
-            JsFuture::from(window.fetch_with_request(&request)).await.unwrap();
+            request("PUT".to_string(), "http://localhost:5000/keys/manifest".to_string(), Some(body)).await;
 
             drop(tx.send(key_id));
         });
@@ -232,23 +189,7 @@ impl KeyStore {
         spawn_local(async move {
             let body = format!("{{\"ciphertext\": \"{}\"}}", ciphertext);
 
-            let mut opts = RequestInit::new();
-            opts.method("POST");
-            opts.mode(RequestMode::Cors);
-            opts.credentials(RequestCredentials::Include);
-            opts.body(Some(&body.into()));
-
-            let request = Request::new_with_str_and_init("http://localhost:5000/keys", &opts).unwrap();
-
-            request
-                .headers()
-                .set("Content-Type", "application/json").unwrap();
-
-            let window = web_sys::window().unwrap();
-            let resp_value = JsFuture::from(window.fetch_with_request(&request)).await.unwrap();
-
-            let resp: Response = resp_value.dyn_into().unwrap();
-            let json = JsFuture::from(resp.json().unwrap()).await.unwrap();
+            let json = request("POST".to_string(), "http://localhost:5000/keys".to_string(), Some(body)).await;
 
             let key_id: String = js_sys::Reflect::get(&json, &"key_id".into()).unwrap().as_string().unwrap();
             let ciphertext: String = js_sys::Reflect::get(&json, &"ciphertext".into()).unwrap().as_string().unwrap();
@@ -291,20 +232,7 @@ impl KeyStore {
         let (tx, rx) = oneshot::channel();
 
         spawn_local(async move {
-            let mut opts = RequestInit::new();
-            opts.method("POST");
-            opts.mode(RequestMode::Cors);
-            opts.credentials(RequestCredentials::Include);
-            opts.body(Some(&payload.into()));
-
-            let request = Request::new_with_str_and_init("http://localhost:5000/keys/rotate", &opts).unwrap();
-
-            request
-                .headers()
-                .set("Content-Type", "application/json").unwrap();
-
-            let window = web_sys::window().unwrap();
-            JsFuture::from(window.fetch_with_request(&request)).await.unwrap();
+            request("POST".to_string(), "http://localhost:5000/keys/rotate".to_string(), Some(payload)).await;
 
             drop(tx.send((token, new_hashed_passphrase)));
         });

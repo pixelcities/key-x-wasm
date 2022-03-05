@@ -6,6 +6,7 @@ mod keystore;
 mod protocol;
 mod crypto;
 mod storage;
+mod utils;
 
 pub use {
     keystore::KeyStore,

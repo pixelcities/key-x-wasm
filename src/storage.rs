@@ -7,8 +7,10 @@ use rand::rngs::OsRng;
 use libsignal_protocol::*;
 use libsignal_protocol::SessionStore;
 use uuid::Uuid;
-
 use serde::{Deserialize, Serialize};
+
+use crate::utils::*;
+use crate::crypto::*;
 
 /*
  * Simply (and unsafely) override some internal structs to enable
@@ -66,40 +68,53 @@ struct State {
     keys: Vec<(((String, u32), String), Vec<u8>)>, // HashMap<(Cow<'static, ProtocolAddress>, Uuid), SenderKeyRecord>
 }
 
+#[derive(Clone)]
 pub struct SyncableStore {
     #[allow(dead_code)]
-    pub store: InMemSignalProtocolStore
+    pub store: InMemSignalProtocolStore,
+    #[allow(dead_code)]
+    secret_key: String
 }
 
-fn load_state(_secret_key: &String) -> InMemSignalProtocolStore {
-    // TODO: actually load state
-    let mut csprng = OsRng;
-    let identity_key = IdentityKeyPair::generate(&mut csprng);
-
-    InMemSignalProtocolStore::new(identity_key, 1).unwrap()
-}
-
+/*
+ * Syncable ProtocolStore
+ *
+ * Wrapper around the ProtocolStore, with some added functions to enable syncing the store
+ * remotely. This implementation is not exactly safe from race conditions, as it may be killed
+ * at any time before syncing the state. Rather than doing this properly we will just take the
+ * easy road for now and embrace this property by only syncing sporadically to keep the overhead
+ * low.
+ *
+ * This does require that any messages in limbo (or just all of them) need to be replayed.
+ */
 impl SyncableStore {
-    pub fn new(secret_key: &String) -> SyncableStore {
-        let store = load_state(secret_key);
-
-        SyncableStore {
-            store: store
-        }
-    }
-
-    pub fn register() -> SyncableStore {
+    pub fn register(secret_key: String) -> SyncableStore {
         let mut csprng = OsRng;
         let identity_key = IdentityKeyPair::generate(&mut csprng);
         let store = InMemSignalProtocolStore::new(identity_key, 1).unwrap();
 
         SyncableStore {
-            store: store
+            store: store,
+            secret_key: secret_key
+        }
+    }
+
+    pub async fn new(secret_key: String) -> Self {
+        let json = request("GET".to_string(), "http://localhost:5000/protocol/sync".to_string(), None).await;
+
+        let cstate: String = js_sys::Reflect::get(&json, &"state".into()).unwrap().as_string().unwrap();
+        let bytes = base64::decode(decrypt_custom(&cstate, secret_key.as_bytes())).unwrap();
+
+        let store = SyncableStore::deserialize(&bytes[..]).await;
+
+        SyncableStore {
+            store: store,
+            secret_key: secret_key
         }
     }
 
     #[allow(dead_code)]
-    pub async fn deserialize(data: &[u8]) -> Self {
+    pub async fn deserialize(data: &[u8]) -> InMemSignalProtocolStore {
         let state: State = bincode::deserialize(data).unwrap();
 
         // Start with the identity_key, so that the store may be initialized
@@ -145,9 +160,7 @@ impl SyncableStore {
             store.store_sender_key(&address, uuid, &record, None).await.unwrap();
         }
 
-        Self {
-            store: store
-        }
+        store
     }
 
     #[allow(dead_code)]
@@ -182,8 +195,73 @@ impl SyncableStore {
 
         bincode::serialize(&state).unwrap()
     }
+
+    /*
+     * Save the current state remotely
+     *
+     * While this is never truly in sync, we can replay (incoming AND outgoing) messages after
+     * the state is restored to get all the chains back in order. This assumes that we don't
+     * lose messages and are willing to replay a ton of them.
+     */
+    pub async fn sync(&self) -> () {
+        let bytes = self.serialize();
+        let cstate = encrypt_custom(&base64::encode(&bytes), self.secret_key.as_bytes());
+
+        request("PUT".to_string(), "http://localhost:5000/protocol/sync".to_string(), Some(cstate)).await;
+    }
 }
 
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct PreKeyBundleSerde {
+    registration_id: u32, // registration_id: u32,
+    device_id: u32, // device_id: u32,
+    pre_key_id: Option<u32>, // pre_key_id: Option<PreKeyId>,
+    pre_key_public: Vec<u8>, // pre_key_public: Option<PublicKey>,
+    signed_pre_key_id: u32, // signed_pre_key_id: SignedPreKeyId,
+    signed_pre_key_public: Vec<u8>, // signed_pre_key_public: PublicKey,
+    signed_pre_key_signature: Vec<u8>, // signed_pre_key_signature: Vec<u8>,
+    identity_key: Vec<u8> // identity_key: IdentityKey,
+}
+
+impl PreKeyBundleSerde {
+    pub fn deserialize(data: &[u8]) -> Self {
+        bincode::deserialize(data).unwrap()
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        bincode::serialize(self).unwrap()
+    }
+}
+
+impl From<PreKeyBundle> for PreKeyBundleSerde {
+    fn from(bundle: PreKeyBundle) -> Self {
+        PreKeyBundleSerde {
+            registration_id: bundle.registration_id().unwrap(),
+            device_id: bundle.device_id().unwrap(),
+            pre_key_id: bundle.pre_key_id().unwrap(),
+            pre_key_public: bundle.pre_key_public().unwrap().unwrap().serialize().to_vec(),
+            signed_pre_key_id: bundle.signed_pre_key_id().unwrap(),
+            signed_pre_key_public: bundle.signed_pre_key_public().unwrap().serialize().to_vec(),
+            signed_pre_key_signature: bundle.signed_pre_key_signature().unwrap().to_vec(),
+            identity_key: bundle.identity_key().unwrap().public_key().serialize().to_vec(),
+        }
+    }
+}
+
+impl From<PreKeyBundleSerde> for PreKeyBundle {
+    fn from(bundle: PreKeyBundleSerde) -> Self {
+        PreKeyBundle::new(
+            bundle.registration_id,
+            bundle.device_id,
+            Some((bundle.pre_key_id.unwrap(), PublicKey::deserialize(&bundle.pre_key_public).unwrap())),
+            bundle.signed_pre_key_id,
+            PublicKey::deserialize(&bundle.signed_pre_key_public).unwrap(),
+            bundle.signed_pre_key_signature,
+            IdentityKey::new(PublicKey::deserialize(&bundle.identity_key).unwrap()),
+        ).unwrap()
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -194,15 +272,15 @@ mod tests {
     #[test]
     fn test_serde() {
         async {
-            let mut store = SyncableStore::register();
-            let key_pair = store.store.get_identity_key_pair(None).await.unwrap();
+            let mut storage: SyncableStore = SyncableStore::register("".to_owned());
+            let key_pair = &storage.store.get_identity_key_pair(None).await.unwrap();
             let identity_key = key_pair.identity_key();
 
-            let encoded = base64::encode(store.serialize());
+            let encoded = base64::encode(storage.serialize());
             let bytes = &base64::decode(encoded).unwrap();
 
             let store = SyncableStore::deserialize(bytes).await;
-            let key_pair = store.store.get_identity_key_pair(None).await.unwrap();
+            let key_pair = store.get_identity_key_pair(None).await.unwrap();
             let roundtrip_identity_key = key_pair.identity_key();
 
             assert_eq!(identity_key, roundtrip_identity_key);
