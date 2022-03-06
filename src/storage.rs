@@ -1,4 +1,5 @@
 extern crate base64;
+extern crate hex;
 
 use std::collections::HashMap;
 use std::borrow::Cow;
@@ -73,7 +74,7 @@ pub struct SyncableStore {
     #[allow(dead_code)]
     pub store: InMemSignalProtocolStore,
     #[allow(dead_code)]
-    secret_key: String
+    secret_key: Vec<u8>
 }
 
 /*
@@ -95,21 +96,22 @@ impl SyncableStore {
 
         SyncableStore {
             store: store,
-            secret_key: secret_key
+            secret_key: hex::decode(secret_key).unwrap()
         }
     }
 
     pub async fn new(secret_key: String) -> Self {
         let json = request("GET".to_string(), "http://localhost:5000/protocol/sync".to_string(), None).await;
 
+        let secret = hex::decode(secret_key).unwrap();
         let cstate: String = js_sys::Reflect::get(&json, &"state".into()).unwrap().as_string().unwrap();
-        let bytes = base64::decode(decrypt_custom(&cstate, secret_key.as_bytes())).unwrap();
+        let bytes = base64::decode(decrypt_custom(&cstate, &secret[..])).unwrap();
 
         let store = SyncableStore::deserialize(&bytes[..]).await;
 
         SyncableStore {
             store: store,
-            secret_key: secret_key
+            secret_key: secret
         }
     }
 
@@ -205,9 +207,10 @@ impl SyncableStore {
      */
     pub async fn sync(&self) -> () {
         let bytes = self.serialize();
-        let cstate = encrypt_custom(&base64::encode(&bytes), self.secret_key.as_bytes());
+        let cstate = encrypt_custom(&base64::encode(&bytes), &self.secret_key[..]);
+        let payload = format!("{{\"state\": \"{}\" }}", cstate);
 
-        request("PUT".to_string(), "http://localhost:5000/protocol/sync".to_string(), Some(cstate)).await;
+        request("PUT".to_string(), "http://localhost:5000/protocol/sync".to_string(), Some(payload)).await;
     }
 }
 
