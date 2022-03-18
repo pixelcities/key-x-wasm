@@ -136,11 +136,11 @@ impl KeyStore {
         }
     }
 
-    pub fn create_named_key(&self, name: String) -> Promise {
+    pub fn create_named_key(&self, name: String, keysize: u32) -> Promise {
         let _self = self.inner.clone();
         let (tx, rx) = oneshot::channel();
 
-        let promise = self.generate_key();
+        let promise = self.generate_key(keysize);
 
         spawn_local(async move {
             // Generate a new key
@@ -177,11 +177,14 @@ impl KeyStore {
         wasm_bindgen_futures::future_to_promise(done)
     }
 
-    pub fn generate_key(&self) -> Promise {
+    pub fn generate_key(&self, keysize: u32) -> Promise {
         let mut csprng = OsRng;
 
         let _self = self.inner.clone();
-        let key = hex::encode(gen_key(&mut csprng));
+        let key = match keysize {
+            16 => hex::encode(gen_key_16(&mut csprng)),
+            _ => hex::encode(gen_key_32(&mut csprng))
+        };
         let ciphertext = self.encrypt_key(&key);
 
         let (tx, rx) = oneshot::channel();
@@ -251,6 +254,16 @@ impl KeyStore {
         };
 
         wasm_bindgen_futures::future_to_promise(done)
+    }
+
+    pub fn encrypt_metadata(&self, plaintext: String) -> String {
+        let metadata_key = hex::decode(self.get_named_key("metadata".to_string())).unwrap();
+        encrypt_custom(&plaintext, &metadata_key[..])
+    }
+
+    pub fn decrypt_metadata(&self, ciphertext: String) -> String {
+        let metadata_key = hex::decode(self.get_named_key("metadata".to_string())).unwrap();
+        decrypt_custom(&ciphertext, &metadata_key[..])
     }
 
     fn derive_keys(&self, email: String, passphrase: String) -> (Option<Output>, String) {

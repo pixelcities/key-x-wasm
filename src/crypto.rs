@@ -11,7 +11,13 @@ pub fn gen_nonce<T>(csprng: &mut T) -> [u8; 12] where T: CryptoRng + Rng, {
     nonce
 }
 
-pub fn gen_key<T>(csprng: &mut T) -> [u8; 32] where T: CryptoRng + Rng, {
+pub fn gen_key_16<T>(csprng: &mut T) -> [u8; 16] where T: CryptoRng + Rng, {
+    let mut key = [0u8; 16];
+    csprng.fill_bytes(&mut key);
+    key
+}
+
+pub fn gen_key_32<T>(csprng: &mut T) -> [u8; 32] where T: CryptoRng + Rng, {
     let mut key = [0u8; 32];
     csprng.fill_bytes(&mut key);
     key

@@ -18,7 +18,8 @@ use crate::storage::{SyncableStore, PreKeyBundleSerde};
 use crate::utils::*;
 
 pub struct ProtocolInner {
-    storage: RefCell<Option<SyncableStore>>
+    storage: RefCell<Option<SyncableStore>>,
+    timeout: RefCell<Option<i32>>
 }
 
 #[wasm_bindgen]
@@ -82,7 +83,8 @@ impl Protocol {
 
         Protocol {
             inner: Arc::new(ProtocolInner {
-                storage: RefCell::new(None)
+                storage: RefCell::new(None),
+                timeout: RefCell::new(None)
             })
         }
     }
@@ -230,21 +232,28 @@ impl Protocol {
     pub fn schedule_sync(&self) -> () {
         let window = web_sys::window().unwrap();
 
-        let _self = self.inner.clone();
-        let f = Closure::wrap(Box::new(move || {
-            let storage = _self.storage.borrow().clone().unwrap();
+        // Only create a timeout callback when there is no handle to an existing one
+        if self.inner.timeout.borrow().is_none() {
+            let _self = self.inner.clone();
+            let f = Closure::wrap(Box::new(move || {
+                let storage = _self.storage.borrow().clone().unwrap();
 
-            let _obj: &js_sys::Object = wasm_bindgen_futures::future_to_promise(async move {
-                storage.sync().await;
+                // Unset timeout "lock"
+                _self.timeout.borrow_mut().take();
 
-                Ok(JsValue::undefined())
-            }).as_ref();
+                let _obj: &js_sys::Object = wasm_bindgen_futures::future_to_promise(async move {
+                    storage.sync().await;
 
-        }) as Box<dyn FnMut()>);
-        window.set_timeout_with_callback_and_timeout_and_arguments_0(&f.as_ref().unchecked_ref(), 30_000).unwrap();
+                    Ok(JsValue::undefined())
+                }).as_ref();
 
-        // TODO: this leaks memory
-        f.forget();
+            }) as Box<dyn FnMut()>);
+            let handle = window.set_timeout_with_callback_and_timeout_and_arguments_0(&f.as_ref().unchecked_ref(), 30_000).unwrap();
+            self.inner.timeout.borrow_mut().replace(handle);
+
+            // TODO: this leaks memory
+            f.forget();
+        }
     }
 }
 
