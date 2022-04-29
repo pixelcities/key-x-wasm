@@ -30,7 +30,12 @@ pub struct Protocol {
 async fn gen_pre_key_bundles(storage: &mut SyncableStore) -> () {
     let mut csprng = OsRng;
 
-    // TODO: allow multiple
+    let response = request("GET".to_string(), "http://localhost:5000/protocol/bundles".to_owned(), None).await;
+    let bundle_id = match response.as_f64() {
+        Some(i) => (i as u32) + 1,
+        None => 1
+    };
+
     let signed_pre_key_id = 1;
     let signed_pre_key_pair = KeyPair::generate(&mut csprng);
 
@@ -53,7 +58,7 @@ async fn gen_pre_key_bundles(storage: &mut SyncableStore) -> () {
 
     let identity_key = *storage.store.get_identity_key_pair(None).await.unwrap().identity_key();
 
-    for i in 1..6 {
+    for i in bundle_id..bundle_id+5 {
         let pre_key_id = i;
         let pre_key_pair = KeyPair::generate(&mut csprng);
 
@@ -124,6 +129,20 @@ impl Protocol {
         };
 
         wasm_bindgen_futures::future_to_promise(done)
+    }
+
+    pub fn add_pre_key_bundles(&self) -> Promise {
+        let _self = self.inner.clone();
+
+        wasm_bindgen_futures::future_to_promise(async move {
+            let mut storage = _self.storage.borrow_mut().take().unwrap();
+
+            gen_pre_key_bundles(&mut storage).await;
+
+            _self.storage.replace(Some(storage));
+
+            Ok(JsValue::undefined())
+        })
     }
 
     pub fn encrypt(&self, user_id: String, message: String) -> Promise {

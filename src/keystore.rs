@@ -177,6 +177,20 @@ impl KeyStore {
         wasm_bindgen_futures::future_to_promise(done)
     }
 
+    pub fn add_key(&self, key_id: String, plaintext: String) -> Promise {
+        let ciphertext = self.encrypt_key(&plaintext);
+
+        self.inner.keys.borrow_mut().insert(key_id.clone(), ciphertext.clone());
+
+        wasm_bindgen_futures::future_to_promise(async move {
+            let body = format!("{{\"ciphertext\": \"{}\"}}", ciphertext);
+
+            request("PUT".to_string(), format!("http://localhost:5000/keys/{}", key_id), Some(body)).await;
+
+            Ok(JsValue::from_str(&key_id))
+        })
+    }
+
     pub fn generate_key(&self, keysize: u32) -> Promise {
         let mut csprng = OsRng;
 
