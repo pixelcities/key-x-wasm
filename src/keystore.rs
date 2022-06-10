@@ -270,13 +270,13 @@ impl KeyStore {
         wasm_bindgen_futures::future_to_promise(done)
     }
 
-    pub fn encrypt_metadata(&self, plaintext: String) -> String {
-        let metadata_key = hex::decode(self.get_named_key("metadata".to_string())).unwrap();
+    pub fn encrypt_metadata(&self, key_id: String, plaintext: String) -> String {
+        let metadata_key = hex::decode(self.get_key(key_id)).unwrap();
         encrypt_custom(&plaintext, &metadata_key[..])
     }
 
-    pub fn decrypt_metadata(&self, ciphertext: String) -> String {
-        let metadata_key = hex::decode(self.get_named_key("metadata".to_string())).unwrap();
+    pub fn decrypt_metadata(&self, key_id: String, ciphertext: String) -> String {
+        let metadata_key = hex::decode(self.get_key(key_id)).unwrap();
         decrypt_custom(&ciphertext, &metadata_key[..])
     }
 
