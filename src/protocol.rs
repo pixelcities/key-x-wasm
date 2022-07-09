@@ -37,24 +37,31 @@ async fn gen_pre_key_bundles(storage: &mut SyncableStore) -> () {
     };
 
     let signed_pre_key_id = 1;
-    let signed_pre_key_pair = KeyPair::generate(&mut csprng);
+    let signed_pre_key_record = match storage.store.get_signed_pre_key(signed_pre_key_id, None).await {
+        Ok(record) => record,
+        Err(_) => {
+            let signed_pre_key_pair = KeyPair::generate(&mut csprng);
 
-    let signed_pre_key_public = signed_pre_key_pair.public_key.serialize();
-    let signed_pre_key_signature = storage.store
-        .get_identity_key_pair(None).await.unwrap()
-        .private_key()
-        .calculate_signature(&signed_pre_key_public, &mut csprng).unwrap();
+            let signed_pre_key_public = signed_pre_key_pair.public_key.serialize();
+            let signed_pre_key_signature = storage.store
+                .get_identity_key_pair(None).await.unwrap()
+                .private_key()
+                .calculate_signature(&signed_pre_key_public, &mut csprng).unwrap();
 
-    storage.store.save_signed_pre_key(
-        signed_pre_key_id,
-        &SignedPreKeyRecord::new(
-            signed_pre_key_id,
-            Date::now() as u64,
-            &signed_pre_key_pair,
-            &signed_pre_key_signature,
-        ),
-        None
-    ).await.unwrap();
+            storage.store.save_signed_pre_key(
+                signed_pre_key_id,
+                &SignedPreKeyRecord::new(
+                    signed_pre_key_id,
+                    Date::now() as u64,
+                    &signed_pre_key_pair,
+                    &signed_pre_key_signature,
+                ),
+                None
+            ).await.unwrap();
+
+            storage.store.get_signed_pre_key(signed_pre_key_id, None).await.unwrap()
+        }
+    };
 
     let identity_key = *storage.store.get_identity_key_pair(None).await.unwrap().identity_key();
 
@@ -69,8 +76,8 @@ async fn gen_pre_key_bundles(storage: &mut SyncableStore) -> () {
             1,
             Some((pre_key_id, pre_key_pair.public_key)),
             signed_pre_key_id,
-            signed_pre_key_pair.public_key,
-            signed_pre_key_signature.to_vec(),
+            signed_pre_key_record.public_key().unwrap(),
+            signed_pre_key_record.signature().unwrap(),
             identity_key,
         ).unwrap().into();
         let bundle = base64::encode(pre_key_bundle.serialize());
@@ -138,6 +145,7 @@ impl Protocol {
             let mut storage = _self.storage.borrow_mut().take().unwrap();
 
             gen_pre_key_bundles(&mut storage).await;
+            storage.sync().await;
 
             _self.storage.replace(Some(storage));
 
