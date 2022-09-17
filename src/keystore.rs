@@ -77,7 +77,7 @@ impl KeyStore {
 
         // Get all the keys
         spawn_local(async move {
-            let json = request("GET".to_string(), "http://localhost:5000/keys".to_string(), None).await;
+            let json = request("GET".to_string(), format!("{}/keys", env!("API_BASEPATH")), None).await;
 
             for key in js_sys::try_iter(&json).unwrap().unwrap() {
                 let obj = key.unwrap();
@@ -89,7 +89,7 @@ impl KeyStore {
 
             // And also the manifest
             spawn_local(async move {
-                let json = request("GET".to_string(), "http://localhost:5000/keys/manifest".to_string(), None).await;
+                let json = request("GET".to_string(), format!("{}/keys/manifest", env!("API_BASEPATH")), None).await;
                 let manifest = js_sys::Reflect::get(&json, &"manifest".into()).unwrap();
 
                 for entry in js_sys::Object::entries(&manifest.into()).iter() {
@@ -162,7 +162,7 @@ impl KeyStore {
 
             let body = format!("{{\"manifest\": {{ {} }} }}", entries.join(","));
 
-            request("PUT".to_string(), "http://localhost:5000/keys/manifest".to_string(), Some(body)).await;
+            request("PUT".to_string(), format!("{}/keys/manifest", env!("API_BASEPATH")), Some(body)).await;
 
             drop(tx.send(key_id));
         });
@@ -185,7 +185,7 @@ impl KeyStore {
         wasm_bindgen_futures::future_to_promise(async move {
             let body = format!("{{\"ciphertext\": \"{}\"}}", ciphertext);
 
-            request("PUT".to_string(), format!("http://localhost:5000/keys/{}", key_id), Some(body)).await;
+            request("PUT".to_string(), format!("{}/keys/{}", env!("API_BASEPATH"), key_id), Some(body)).await;
 
             Ok(JsValue::from_str(&key_id))
         })
@@ -206,7 +206,7 @@ impl KeyStore {
         spawn_local(async move {
             let body = format!("{{\"ciphertext\": \"{}\"}}", ciphertext);
 
-            let json = request("POST".to_string(), "http://localhost:5000/keys".to_string(), Some(body)).await;
+            let json = request("POST".to_string(), format!("{}/keys", env!("API_BASEPATH")), Some(body)).await;
 
             let key_id: String = js_sys::Reflect::get(&json, &"key_id".into()).unwrap().as_string().unwrap();
             let ciphertext: String = js_sys::Reflect::get(&json, &"ciphertext".into()).unwrap().as_string().unwrap();
@@ -249,7 +249,7 @@ impl KeyStore {
         let (tx, rx) = oneshot::channel();
 
         spawn_local(async move {
-            request("POST".to_string(), "http://localhost:5000/keys/rotate".to_string(), Some(payload)).await;
+            request("POST".to_string(), format!("{}/keys/rotate", env!("API_BASEPATH")), Some(payload)).await;
 
             drop(tx.send((token, new_hashed_passphrase)));
         });

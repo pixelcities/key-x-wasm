@@ -30,7 +30,7 @@ pub struct Protocol {
 async fn gen_pre_key_bundles(storage: &mut SyncableStore) -> () {
     let mut csprng = OsRng;
 
-    let response = request("GET".to_string(), "http://localhost:5000/protocol/bundles".to_owned(), None).await;
+    let response = request("GET".to_string(), format!("{}/protocol/bundles", env!("API_BASEPATH")), None).await;
     let bundle_id = match response.as_f64() {
         Some(i) => (i as u32) + 1,
         None => 1
@@ -83,7 +83,7 @@ async fn gen_pre_key_bundles(storage: &mut SyncableStore) -> () {
         let bundle = base64::encode(pre_key_bundle.serialize());
         let payload = format!("{{\"bundle_id\": {}, \"bundle\": \"{}\" }}", pre_key_id, bundle);
 
-        request("POST".to_string(), "http://localhost:5000/protocol/bundles".to_owned(), Some(payload)).await;
+        request("POST".to_string(), format!("{}/protocol/bundles", env!("API_BASEPATH")), Some(payload)).await;
     };
 }
 
@@ -163,10 +163,10 @@ impl Protocol {
 
             // No existing session means we need to fetch a pre_key_bundle
             if storage.store.session_store.load_session(&address, None).await.unwrap().is_none() {
-                let response = request("GET".to_string(), format!("http://localhost:5000/protocol/bundles/{}", &user_id), None).await; // assume it has a bundle
+                let response = request("GET".to_string(), format!("{}/protocol/bundles/{}", env!("API_BASEPATH"), &user_id), None).await; // assume it has a bundle
                 let bundle_id = response.as_f64().unwrap() as u32;
 
-                let bundle = request("DELETE".to_string(), format!("http://localhost:5000/protocol/bundles/{}/{}", &user_id, &bundle_id), None).await.as_string().unwrap();
+                let bundle = request("DELETE".to_string(), format!("{}/protocol/bundles/{}/{}", env!("API_BASEPATH"), &user_id, &bundle_id), None).await.as_string().unwrap();
                 let pre_key_bundle: PreKeyBundle = PreKeyBundleSerde::deserialize(&base64::decode(&bundle).unwrap()[..]).into();
 
                 // Create the session

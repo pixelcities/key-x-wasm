@@ -101,7 +101,7 @@ impl SyncableStore {
     }
 
     pub async fn new(secret_key: String) -> Self {
-        let json = request("GET".to_string(), "http://localhost:5000/protocol/sync".to_string(), None).await;
+        let json = request("GET".to_string(), format!("{}/protocol/sync", env!("API_BASEPATH")), None).await;
 
         let secret = hex::decode(secret_key).unwrap();
         let cstate: String = js_sys::Reflect::get(&json, &"state".into()).unwrap().as_string().unwrap();
@@ -210,7 +210,7 @@ impl SyncableStore {
         let cstate = encrypt_custom(&base64::encode(&bytes), &self.secret_key[..]);
         let payload = format!("{{\"state\": \"{}\" }}", cstate);
 
-        request("PUT".to_string(), "http://localhost:5000/protocol/sync".to_string(), Some(payload)).await;
+        request("PUT".to_string(), format!("{}/protocol/sync", env!("API_BASEPATH")), Some(payload)).await;
     }
 }
 
