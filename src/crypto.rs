@@ -1,3 +1,6 @@
+extern crate hex;
+
+use wasm_bindgen::prelude::*;
 use std::str;
 
 use rand::rngs::OsRng;
@@ -48,3 +51,12 @@ pub fn decrypt_custom(ciphertext: &String, secret_key: &[u8]) -> String {
     str::from_utf8(&plaintext).unwrap().to_string()
 }
 
+#[wasm_bindgen]
+pub fn aes_gcm_siv_encrypt(plaintext: String, secret_key: String) -> String {
+    encrypt_custom(&plaintext, &hex::decode(secret_key).unwrap())
+}
+
+#[wasm_bindgen]
+pub fn aes_gcm_siv_decrypt(ciphertext: String, secret_key: String) -> String {
+    decrypt_custom(&ciphertext, &hex::decode(secret_key).unwrap())
+}

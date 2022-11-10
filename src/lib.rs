@@ -13,6 +13,7 @@ pub use libsignal_protocol;
 pub use {
     keystore::KeyStore,
     protocol::Protocol,
-    storage::PreKeyBundleSerde
+    storage::PreKeyBundleSerde,
+    crypto::*
 };
 
