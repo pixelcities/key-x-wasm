@@ -12,7 +12,7 @@ use std::convert::TryFrom;
 
 use rand::rngs::OsRng;
 use libsignal_protocol::*;
-use libsignal_protocol::{PreKeyBundle, PreKeySignalMessage};
+use libsignal_protocol::{PreKeyBundle, PreKeySignalMessage, Fingerprint};
 use crate::storage::{SyncableStore, PreKeyBundleSerde};
 
 use crate::utils::*;
@@ -150,6 +150,24 @@ impl Protocol {
             _self.storage.replace(Some(storage));
 
             Ok(JsValue::undefined())
+        })
+    }
+
+    pub fn get_fingerprint(&self, our_id: String, their_id: String) -> Promise {
+        let storage = self.inner.storage.borrow().clone().unwrap();
+        let address = ProtocolAddress::new(their_id.clone(), 1);
+
+        wasm_bindgen_futures::future_to_promise(async move {
+            let our_identity_key = storage.store.identity_store.get_identity_key_pair(None).await.unwrap().identity_key().clone();
+
+            match storage.store.identity_store.get_identity(&address, None).await.unwrap() {
+                Some(their_identity_key) => {
+                    let fprint = Fingerprint::new(2, 5200, our_id.as_bytes(), &our_identity_key, their_id.as_bytes(), &their_identity_key).unwrap().display;
+
+                    Ok(JsValue::from_str(&fprint.to_string()))
+                },
+                None => Ok(JsValue::undefined())
+            }
         })
     }
 
