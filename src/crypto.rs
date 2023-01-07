@@ -38,7 +38,7 @@ pub fn encrypt_custom(plaintext: &String, secret_key: &[u8]) -> String {
     format!("{}:{}", base64::encode(nonce), base64::encode(ciphertext))
 }
 
-pub fn decrypt_custom(ciphertext: &String, secret_key: &[u8]) -> String {
+pub fn decrypt_custom(ciphertext: &String, secret_key: &[u8]) -> Result<String, String> {
     let split: Vec<&str> = ciphertext.split(':').collect();
     let nonce: Vec<u8> = base64::decode(split[0]).unwrap();
     let bytes = base64::decode(split[1]).unwrap();
@@ -46,9 +46,10 @@ pub fn decrypt_custom(ciphertext: &String, secret_key: &[u8]) -> String {
     let key = AesKey::from_slice(secret_key);
     let cipher = Aes256GcmSiv::new(key);
 
-    let plaintext = cipher.decrypt(Nonce::from_slice(&nonce), bytes.as_ref()).expect("decryption failure!");
-
-    str::from_utf8(&plaintext).unwrap().to_string()
+    match cipher.decrypt(Nonce::from_slice(&nonce), bytes.as_ref()) {
+        Ok(plaintext) => Ok(str::from_utf8(&plaintext).unwrap().to_string()),
+        Err(_) => Err("decryption failure!".to_string())
+    }
 }
 
 #[wasm_bindgen]
@@ -58,5 +59,5 @@ pub fn aes_gcm_siv_encrypt(plaintext: String, secret_key: String) -> String {
 
 #[wasm_bindgen]
 pub fn aes_gcm_siv_decrypt(ciphertext: String, secret_key: String) -> String {
-    decrypt_custom(&ciphertext, &hex::decode(secret_key).unwrap())
+    decrypt_custom(&ciphertext, &hex::decode(secret_key).unwrap()).unwrap()
 }

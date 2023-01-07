@@ -105,7 +105,7 @@ impl SyncableStore {
 
         let secret = hex::decode(secret_key).unwrap();
         let cstate: String = js_sys::Reflect::get(&json, &"state".into()).unwrap().as_string().unwrap();
-        let bytes = base64::decode(decrypt_custom(&cstate, &secret[..])).unwrap();
+        let bytes = base64::decode(decrypt_custom(&cstate, &secret[..]).unwrap()).unwrap();
 
         let store = SyncableStore::deserialize(&bytes[..]).await;
 

@@ -73,47 +73,51 @@ impl KeyStore {
     pub fn init(&self) -> Promise {
         let _self = self.inner.clone();
 
-        let (tx, rx) = oneshot::channel();
+        wasm_bindgen_futures::future_to_promise(async move {
+            // Just get a single key at first, to test if the passphrase was correct
+            let json = request("GET".to_string(), format!("{}/keys?limit=1", env!("API_BASEPATH")), None).await;
+            let key = js_sys::try_iter(&json).ok().flatten().and_then(|mut keys| keys.next());
 
-        // Get all the keys
-        spawn_local(async move {
-            let json = request("GET".to_string(), format!("{}/keys", env!("API_BASEPATH")), None).await;
+            match key {
+                Some(Ok(key)) => {
+                    let ciphertext: String = js_sys::Reflect::get(&key, &"ciphertext".into()).ok().and_then(|x| x.as_string()).unwrap_or("".to_string());
+                    let root_key = _self.root_key.borrow().unwrap();
 
-            for key in js_sys::try_iter(&json).unwrap().unwrap() {
-                let obj = key.unwrap();
-                let key_id: String = js_sys::Reflect::get(&obj, &"key_id".into()).unwrap().as_string().unwrap();
-                let ciphertext: String = js_sys::Reflect::get(&obj, &"ciphertext".into()).unwrap().as_string().unwrap();
+                    // Try the current root_key, reject the promise if it fails
+                    match decrypt_custom(&ciphertext, root_key.as_bytes()) {
+                        Ok(_) => {
+                            // Get all the keys
+                            let json = request("GET".to_string(), format!("{}/keys", env!("API_BASEPATH")), None).await;
 
-                _self.keys.borrow_mut().insert(key_id, ciphertext);
+                            for key in js_sys::try_iter(&json).unwrap().unwrap() {
+                                let obj = key.unwrap();
+                                let key_id: String = js_sys::Reflect::get(&obj, &"key_id".into()).unwrap().as_string().unwrap();
+                                let ciphertext: String = js_sys::Reflect::get(&obj, &"ciphertext".into()).unwrap().as_string().unwrap();
+
+                                _self.keys.borrow_mut().insert(key_id, ciphertext);
+                            }
+
+                            // And also the manifest
+                            let json = request("GET".to_string(), format!("{}/keys/manifest", env!("API_BASEPATH")), None).await;
+                            let manifest = js_sys::Reflect::get(&json, &"manifest".into()).unwrap();
+
+                            for entry in js_sys::Object::entries(&manifest.into()).iter() {
+                                let arr: js_sys::Array = entry.into();
+
+                                let name: String = arr.get(0).as_string().unwrap();
+                                let key_id: String = arr.get(1).as_string().unwrap();
+
+                                _self.manifest.borrow_mut().insert(name, key_id);
+                            }
+
+                            Ok(JsValue::undefined())
+                        },
+                        Err(_) => Err(JsValue::undefined())
+                    }
+                },
+                _ => Err(JsValue::undefined())
             }
-
-            // And also the manifest
-            spawn_local(async move {
-                let json = request("GET".to_string(), format!("{}/keys/manifest", env!("API_BASEPATH")), None).await;
-                let manifest = js_sys::Reflect::get(&json, &"manifest".into()).unwrap();
-
-                for entry in js_sys::Object::entries(&manifest.into()).iter() {
-                    let arr: js_sys::Array = entry.into();
-
-                    let name: String = arr.get(0).as_string().unwrap();
-                    let key_id: String = arr.get(1).as_string().unwrap();
-
-                    _self.manifest.borrow_mut().insert(name, key_id);
-                }
-
-                drop(tx.send(""));
-            });
-
-        });
-
-        let done = async move {
-            match rx.await {
-                Ok(_) => Ok(JsValue::undefined()),
-                Err(_) => Err(JsValue::undefined())
-            }
-        };
-
-        wasm_bindgen_futures::future_to_promise(done)
+        })
     }
 
     pub fn get_manifest(&self) -> js_sys::Object {
@@ -277,7 +281,7 @@ impl KeyStore {
 
     pub fn decrypt_metadata(&self, key_id: String, ciphertext: String) -> String {
         let metadata_key = hex::decode(self.get_key(key_id)).unwrap();
-        decrypt_custom(&ciphertext, &metadata_key[..])
+        decrypt_custom(&ciphertext, &metadata_key[..]).unwrap()
     }
 
     fn derive_keys(&self, email: String, passphrase: String) -> (Option<Output>, String) {
@@ -309,7 +313,7 @@ impl KeyStore {
 
     fn decrypt_key(&self, ciphertext: &String) -> String {
         let root_key = self.inner.root_key.borrow().unwrap();
-        decrypt_custom(ciphertext, root_key.as_bytes())
+        decrypt_custom(ciphertext, root_key.as_bytes()).unwrap()
     }
 }
 
