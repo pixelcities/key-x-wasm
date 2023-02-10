@@ -293,7 +293,7 @@ impl Protocol {
                 }).as_ref();
 
             }) as Box<dyn FnMut()>);
-            let handle = window.set_timeout_with_callback_and_timeout_and_arguments_0(&f.as_ref().unchecked_ref(), 30_000).unwrap();
+            let handle = window.set_timeout_with_callback_and_timeout_and_arguments_0(&f.as_ref().unchecked_ref(), 3_000).unwrap();
             self.inner.timeout.borrow_mut().replace(handle);
 
             // TODO: this leaks memory
