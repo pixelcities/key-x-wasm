@@ -23,8 +23,11 @@ jobs:
           node-version: '16.x'
           registry-url: 'https://npm.pkg.github.com'
       - name: Build
-        run: wasm-pack build --scope pixelcities
-      - run: |
+        run: API_BASEPATH=$API_BASEPATH wasm-pack build --scope pixelcities
+        env:
+          API_BASEPATH: ${{ env.API_BASEPATH }}
+      - name: Publish package
+        run: |
           cd pkg
           npm publish
         env:
