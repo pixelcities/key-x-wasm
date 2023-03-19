@@ -22,7 +22,8 @@ use crate::crypto::*;
 pub struct KeyStoreInner {
     root_key: RefCell<Option<Output>>,
     keys: RefCell<HashMap<String, String>>,
-    manifest: RefCell<HashMap<String, String>>
+    manifest: RefCell<HashMap<String, String>>,
+    api_basepath: RefCell<String>
 }
 
 #[wasm_bindgen]
@@ -39,7 +40,8 @@ impl KeyStore {
         KeyStore { inner: Arc::new(KeyStoreInner {
             root_key: RefCell::new(None),
             keys: RefCell::new(HashMap::new()),
-            manifest: RefCell::new(HashMap::new())
+            manifest: RefCell::new(HashMap::new()),
+            api_basepath: RefCell::new(option_env!("API_BASEPATH").unwrap_or("http://localhost:5000").to_string())
         })}
     }
 
@@ -70,12 +72,16 @@ impl KeyStore {
         root_key.is_none()
     }
 
-    pub fn init(&self) -> Promise {
+    pub fn init(&self, api_basepath: JsValue) -> Promise {
         let _self = self.inner.clone();
+
+        if !api_basepath.is_undefined() && api_basepath.is_string() {
+            _self.api_basepath.replace(api_basepath.as_string().unwrap());
+        }
 
         wasm_bindgen_futures::future_to_promise(async move {
             // Just get a single key at first, to test if the passphrase was correct
-            let json = request("GET".to_string(), format!("{}/keys?limit=1", env!("API_BASEPATH")), None).await;
+            let json = request("GET".to_string(), format!("{}/keys?limit=1", _self.api_basepath.borrow()), None).await;
             let key = js_sys::try_iter(&json).ok().flatten().and_then(|mut keys| keys.next());
 
             match key {
@@ -87,7 +93,7 @@ impl KeyStore {
                     match decrypt_custom(&ciphertext, root_key.as_bytes()) {
                         Ok(_) => {
                             // Get all the keys
-                            let json = request("GET".to_string(), format!("{}/keys", env!("API_BASEPATH")), None).await;
+                            let json = request("GET".to_string(), format!("{}/keys", _self.api_basepath.borrow()), None).await;
 
                             for key in js_sys::try_iter(&json).unwrap().unwrap() {
                                 let obj = key.unwrap();
@@ -98,7 +104,7 @@ impl KeyStore {
                             }
 
                             // And also the manifest
-                            let json = request("GET".to_string(), format!("{}/keys/manifest", env!("API_BASEPATH")), None).await;
+                            let json = request("GET".to_string(), format!("{}/keys/manifest", _self.api_basepath.borrow()), None).await;
                             let manifest = js_sys::Reflect::get(&json, &"manifest".into()).unwrap();
 
                             for entry in js_sys::Object::entries(&manifest.into()).iter() {
@@ -140,6 +146,16 @@ impl KeyStore {
         }
     }
 
+    pub fn has_key(&self, id: String) -> bool {
+        self.inner.keys.borrow().contains_key(&id)
+    }
+
+    pub fn get_key_ids(&self) -> JsValue {
+        let keys: Vec<String> = self.inner.keys.borrow().keys().map(|k| k.clone()).collect();
+
+        serde_wasm_bindgen::to_value(&keys).unwrap()
+    }
+
     pub fn create_named_key(&self, name: String, keysize: u32) -> Promise {
         let _self = self.inner.clone();
         let (tx, rx) = oneshot::channel();
@@ -166,7 +182,7 @@ impl KeyStore {
 
             let body = format!("{{\"manifest\": {{ {} }} }}", entries.join(","));
 
-            request("PUT".to_string(), format!("{}/keys/manifest", env!("API_BASEPATH")), Some(body)).await;
+            request("PUT".to_string(), format!("{}/keys/manifest", _self.api_basepath.borrow()), Some(body)).await;
 
             drop(tx.send(key_id));
         });
@@ -186,10 +202,12 @@ impl KeyStore {
 
         self.inner.keys.borrow_mut().insert(key_id.clone(), ciphertext.clone());
 
+        let basepath = self.inner.api_basepath.borrow().clone();
+
         wasm_bindgen_futures::future_to_promise(async move {
             let body = format!("{{\"ciphertext\": \"{}\"}}", ciphertext);
 
-            request("PUT".to_string(), format!("{}/keys/{}", env!("API_BASEPATH"), key_id), Some(body)).await;
+            request("PUT".to_string(), format!("{}/keys/{}", basepath, key_id), Some(body)).await;
 
             Ok(JsValue::from_str(&key_id))
         })
@@ -210,7 +228,7 @@ impl KeyStore {
         spawn_local(async move {
             let body = format!("{{\"ciphertext\": \"{}\"}}", ciphertext);
 
-            let json = request("POST".to_string(), format!("{}/keys", env!("API_BASEPATH")), Some(body)).await;
+            let json = request("POST".to_string(), format!("{}/keys", _self.api_basepath.borrow()), Some(body)).await;
 
             let key_id: String = js_sys::Reflect::get(&json, &"key_id".into()).unwrap().as_string().unwrap();
             let ciphertext: String = js_sys::Reflect::get(&json, &"ciphertext".into()).unwrap().as_string().unwrap();
@@ -248,12 +266,13 @@ impl KeyStore {
             batch.push(format!("{{\"key_id\": \"{}\", \"ciphertext\": \"{}\"}}", key_id, new_ciphertext));
         }
 
+        let basepath = self.inner.api_basepath.borrow().clone();
         let payload = format!("{{\"token\": \"{}\", \"keys\": [{}]}}", token, batch.join(","));
 
         let (tx, rx) = oneshot::channel();
 
         spawn_local(async move {
-            request("POST".to_string(), format!("{}/keys/rotate", env!("API_BASEPATH")), Some(payload)).await;
+            request("POST".to_string(), format!("{}/keys/rotate", basepath), Some(payload)).await;
 
             drop(tx.send((token, new_hashed_passphrase)));
         });

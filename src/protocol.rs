@@ -30,7 +30,7 @@ pub struct Protocol {
 async fn gen_pre_key_bundles(storage: &mut SyncableStore) -> () {
     let mut csprng = OsRng;
 
-    let response = request("GET".to_string(), format!("{}/protocol/bundles", env!("API_BASEPATH")), None).await;
+    let response = request("GET".to_string(), format!("{}/protocol/bundles", storage.api_basepath), None).await;
     let bundle_id = match response.as_f64() {
         Some(i) => (i as u32) + 1,
         None => 1
@@ -83,7 +83,7 @@ async fn gen_pre_key_bundles(storage: &mut SyncableStore) -> () {
         let bundle = base64::encode(pre_key_bundle.serialize());
         let payload = format!("{{\"bundle_id\": {}, \"bundle\": \"{}\" }}", pre_key_id, bundle);
 
-        request("POST".to_string(), format!("{}/protocol/bundles", env!("API_BASEPATH")), Some(payload)).await;
+        request("POST".to_string(), format!("{}/protocol/bundles", storage.api_basepath), Some(payload)).await;
     };
 }
 
@@ -101,11 +101,17 @@ impl Protocol {
         }
     }
 
-    pub fn init(&self, secret_key: String) -> Promise {
+    pub fn init(&self, secret_key: String, api_basepath: JsValue) -> Promise {
         let _self = self.inner.clone();
 
+        let basepath = if !api_basepath.is_undefined() && api_basepath.is_string() {
+            api_basepath.as_string().unwrap()
+        } else {
+            option_env!("API_BASEPATH").unwrap_or("http://localhost:5000").to_string()
+        };
+
         let done = async move {
-            let storage = SyncableStore::new(secret_key).await;
+            let storage = SyncableStore::new(secret_key, basepath).await;
 
             _self.storage.replace(Some(storage));
 
@@ -115,11 +121,17 @@ impl Protocol {
         wasm_bindgen_futures::future_to_promise(done)
     }
 
-    pub fn register(&self, secret_key: String) -> Promise {
+    pub fn register(&self, secret_key: String, api_basepath: JsValue) -> Promise {
         let _self = self.inner.clone();
 
+        let basepath = if !api_basepath.is_undefined() && api_basepath.is_string() {
+            api_basepath.as_string().unwrap()
+        } else {
+            option_env!("API_BASEPATH").unwrap_or("http://localhost:5000").to_string()
+        };
+
         let done = async move {
-            let mut storage = SyncableStore::register(secret_key);
+            let mut storage = SyncableStore::register(secret_key, basepath);
 
             // Generate and publish some bundles
             gen_pre_key_bundles(&mut storage).await;
@@ -181,10 +193,10 @@ impl Protocol {
 
             // No existing session means we need to fetch a pre_key_bundle
             if storage.store.session_store.load_session(&address, None).await.unwrap().is_none() {
-                let response = request("GET".to_string(), format!("{}/protocol/bundles/{}", env!("API_BASEPATH"), &user_id), None).await; // assume it has a bundle
+                let response = request("GET".to_string(), format!("{}/protocol/bundles/{}", storage.api_basepath, &user_id), None).await; // assume it has a bundle
                 let bundle_id = response.as_f64().unwrap() as u32;
 
-                let bundle = request("DELETE".to_string(), format!("{}/protocol/bundles/{}/{}", env!("API_BASEPATH"), &user_id, &bundle_id), None).await.as_string().unwrap();
+                let bundle = request("DELETE".to_string(), format!("{}/protocol/bundles/{}/{}", storage.api_basepath, &user_id, &bundle_id), None).await.as_string().unwrap();
                 let pre_key_bundle: PreKeyBundle = PreKeyBundleSerde::deserialize(&base64::decode(&bundle).unwrap()[..]).into();
 
                 // Create the session

@@ -73,6 +73,7 @@ struct State {
 pub struct SyncableStore {
     #[allow(dead_code)]
     pub store: InMemSignalProtocolStore,
+    pub api_basepath: String,
     #[allow(dead_code)]
     secret_key: Vec<u8>
 }
@@ -89,19 +90,20 @@ pub struct SyncableStore {
  * This does require that any messages in limbo (or just all of them) need to be replayed.
  */
 impl SyncableStore {
-    pub fn register(secret_key: String) -> SyncableStore {
+    pub fn register(secret_key: String, api_basepath: String) -> SyncableStore {
         let mut csprng = OsRng;
         let identity_key = IdentityKeyPair::generate(&mut csprng);
         let store = InMemSignalProtocolStore::new(identity_key, 1).unwrap();
 
         SyncableStore {
             store: store,
-            secret_key: hex::decode(secret_key).unwrap()
+            secret_key: hex::decode(secret_key).unwrap(),
+            api_basepath
         }
     }
 
-    pub async fn new(secret_key: String) -> Self {
-        let json = request("GET".to_string(), format!("{}/protocol/sync", env!("API_BASEPATH")), None).await;
+    pub async fn new(secret_key: String, api_basepath: String) -> Self {
+        let json = request("GET".to_string(), format!("{}/protocol/sync", &api_basepath), None).await;
 
         let secret = hex::decode(secret_key).unwrap();
         let cstate: String = js_sys::Reflect::get(&json, &"state".into()).unwrap().as_string().unwrap();
@@ -111,7 +113,8 @@ impl SyncableStore {
 
         SyncableStore {
             store: store,
-            secret_key: secret
+            secret_key: secret,
+            api_basepath
         }
     }
 
@@ -210,7 +213,7 @@ impl SyncableStore {
         let cstate = encrypt_custom(&base64::encode(&bytes), &self.secret_key[..]);
         let payload = format!("{{\"state\": \"{}\" }}", cstate);
 
-        request("PUT".to_string(), format!("{}/protocol/sync", env!("API_BASEPATH")), Some(payload)).await;
+        request("PUT".to_string(), format!("{}/protocol/sync", self.api_basepath), Some(payload)).await;
     }
 }
 
