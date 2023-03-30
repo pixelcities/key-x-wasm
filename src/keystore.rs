@@ -34,14 +34,20 @@ pub struct KeyStore {
 #[wasm_bindgen]
 impl KeyStore {
     #[wasm_bindgen(constructor)]
-    pub fn new() -> KeyStore {
+    pub fn new(api_basepath: JsValue) -> KeyStore {
         console_error_panic_hook::set_once();
+
+        let basepath = if !api_basepath.is_undefined() && api_basepath.is_string() {
+            api_basepath.as_string().unwrap()
+        } else {
+            option_env!("API_BASEPATH").unwrap_or("http://localhost:5000").to_string()
+        };
 
         KeyStore { inner: Arc::new(KeyStoreInner {
             root_key: RefCell::new(None),
             keys: RefCell::new(HashMap::new()),
             manifest: RefCell::new(HashMap::new()),
-            api_basepath: RefCell::new(option_env!("API_BASEPATH").unwrap_or("http://localhost:5000").to_string())
+            api_basepath: RefCell::new(basepath)
         })}
     }
 
@@ -72,12 +78,8 @@ impl KeyStore {
         root_key.is_none()
     }
 
-    pub fn init(&self, api_basepath: JsValue) -> Promise {
+    pub fn init(&self) -> Promise {
         let _self = self.inner.clone();
-
-        if !api_basepath.is_undefined() && api_basepath.is_string() {
-            _self.api_basepath.replace(api_basepath.as_string().unwrap());
-        }
 
         wasm_bindgen_futures::future_to_promise(async move {
             // Just get a single key at first, to test if the passphrase was correct

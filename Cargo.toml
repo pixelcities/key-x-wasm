@@ -1,7 +1,7 @@
 [package]
 name = "key-x-wasm"
 repository = "https://github.com/pixelcities/key-x-wasm.git"
-version = "0.1.5"
+version = "0.1.6"
 authors = ["PixelCities"]
 edition = "2018"
 
