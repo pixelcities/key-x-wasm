@@ -2,4 +2,4 @@
 
 WASM bindings for KeyX. Store and share keys using the Signal Protocal.
 
-This is just for testing, use at own risk.
+Used in conjuction with the mycelium backend.
