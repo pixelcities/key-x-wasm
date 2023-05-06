@@ -154,10 +154,8 @@ impl Protocol {
         let _self = self.inner.clone();
 
         wasm_bindgen_futures::future_to_promise(async move {
-            match _self.storage.try_borrow_mut() {
-                Ok(mut _storage) => {
-                    let mut storage = _storage.take().unwrap();
-
+            match _self.storage.try_borrow_mut().map(|mut s| s.take().unwrap()) {
+                Ok(mut storage) => {
                     gen_pre_key_bundles(&mut storage).await;
                     storage.sync().await;
 
@@ -199,10 +197,8 @@ impl Protocol {
 
         let _self = self.inner.clone();
         let done = async move {
-            match _self.storage.try_borrow_mut() {
-                Ok(mut _storage) => {
-                    let mut storage = _storage.take().unwrap();
-
+            match _self.storage.try_borrow_mut().map(|mut s| s.take().unwrap()) {
+                Ok(mut storage) => {
                     // No existing session means we need to fetch a pre_key_bundle
                     if storage.store.session_store.load_session(&address, None).await.unwrap().is_none() {
                         let response = request("GET".to_string(), format!("{}/protocol/bundles/{}", storage.api_basepath, &user_id), None).await; // assume it has a bundle
@@ -243,10 +239,8 @@ impl Protocol {
 
         let _self = self.inner.clone();
         let done = async move {
-            match _self.storage.try_borrow_mut() {
-                Ok(mut _storage) => {
-                    let mut storage = _storage.take().unwrap();
-
+            match _self.storage.try_borrow_mut().map(|mut s| s.take().unwrap()) {
+                Ok(mut storage) => {
                     let session_exists = storage.store.session_store.load_session(&address, None).await.unwrap();
 
                     let bytes = base64::decode(&message).unwrap();
