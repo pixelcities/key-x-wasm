@@ -3,7 +3,7 @@ extern crate console_error_panic_hook;
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use js_sys::{Promise, Date};
+use js_sys::{Promise, Date, Error};
 use web_sys::console;
 
 use std::sync::Arc;
@@ -154,31 +154,41 @@ impl Protocol {
         let _self = self.inner.clone();
 
         wasm_bindgen_futures::future_to_promise(async move {
-            let mut storage = _self.storage.borrow_mut().take().unwrap();
+            match _self.storage.try_borrow_mut() {
+                Ok(mut _storage) => {
+                    let mut storage = _storage.take().unwrap();
 
-            gen_pre_key_bundles(&mut storage).await;
-            storage.sync().await;
+                    gen_pre_key_bundles(&mut storage).await;
+                    storage.sync().await;
 
-            _self.storage.replace(Some(storage));
+                    _self.storage.replace(Some(storage));
 
-            Ok(JsValue::undefined())
+                    Ok(JsValue::undefined())
+                },
+                Err(_) => Err(Error::new("Cannot add pre key bundles: storage is already borrowed").into())
+            }
         })
     }
 
     pub fn get_fingerprint(&self, our_id: String, their_id: String) -> Promise {
-        let storage = self.inner.storage.borrow().clone().unwrap();
+        let maybe_store = self.inner.storage.try_borrow().map(|s| s.clone()).unwrap_or(None);
         let address = ProtocolAddress::new(their_id.clone(), 1);
 
         wasm_bindgen_futures::future_to_promise(async move {
-            let our_identity_key = storage.store.identity_store.get_identity_key_pair(None).await.unwrap().identity_key().clone();
+            match maybe_store {
+                Some(storage) => {
+                    let our_identity_key = storage.store.identity_store.get_identity_key_pair(None).await.unwrap().identity_key().clone();
 
-            match storage.store.identity_store.get_identity(&address, None).await.unwrap() {
-                Some(their_identity_key) => {
-                    let fprint = Fingerprint::new(2, 5200, our_id.as_bytes(), &our_identity_key, their_id.as_bytes(), &their_identity_key).unwrap().display;
+                    match storage.store.identity_store.get_identity(&address, None).await.unwrap() {
+                        Some(their_identity_key) => {
+                            let fprint = Fingerprint::new(2, 5200, our_id.as_bytes(), &our_identity_key, their_id.as_bytes(), &their_identity_key).unwrap().display;
 
-                    Ok(JsValue::from_str(&fprint.to_string()))
+                            Ok(JsValue::from_str(&fprint.to_string()))
+                        },
+                        None => Ok(JsValue::undefined())
+                    }
                 },
-                None => Ok(JsValue::undefined())
+                None => Err(Error::new("Cannot get fingerprint: storage is mutably borrowed").into())
             }
         })
     }
@@ -189,32 +199,37 @@ impl Protocol {
 
         let _self = self.inner.clone();
         let done = async move {
-            let mut storage = _self.storage.borrow_mut().take().unwrap();
+            match _self.storage.try_borrow_mut() {
+                Ok(mut _storage) => {
+                    let mut storage = _storage.take().unwrap();
 
-            // No existing session means we need to fetch a pre_key_bundle
-            if storage.store.session_store.load_session(&address, None).await.unwrap().is_none() {
-                let response = request("GET".to_string(), format!("{}/protocol/bundles/{}", storage.api_basepath, &user_id), None).await; // assume it has a bundle
-                let bundle_id = response.as_f64().unwrap() as u32;
+                    // No existing session means we need to fetch a pre_key_bundle
+                    if storage.store.session_store.load_session(&address, None).await.unwrap().is_none() {
+                        let response = request("GET".to_string(), format!("{}/protocol/bundles/{}", storage.api_basepath, &user_id), None).await; // assume it has a bundle
+                        let bundle_id = response.as_f64().unwrap() as u32;
 
-                let bundle = request("DELETE".to_string(), format!("{}/protocol/bundles/{}/{}", storage.api_basepath, &user_id, &bundle_id), None).await.as_string().unwrap();
-                let pre_key_bundle: PreKeyBundle = PreKeyBundleSerde::deserialize(&base64::decode(&bundle).unwrap()[..]).into();
+                        let bundle = request("DELETE".to_string(), format!("{}/protocol/bundles/{}/{}", storage.api_basepath, &user_id, &bundle_id), None).await.as_string().unwrap();
+                        let pre_key_bundle: PreKeyBundle = PreKeyBundleSerde::deserialize(&base64::decode(&bundle).unwrap()[..]).into();
 
-                // Create the session
-                process_prekey_bundle(
-                    &address,
-                    &mut storage.store.session_store,
-                    &mut storage.store.identity_store,
-                    &pre_key_bundle,
-                    &mut csprng,
-                    None,
-                ).await.unwrap();
+                        // Create the session
+                        process_prekey_bundle(
+                            &address,
+                            &mut storage.store.session_store,
+                            &mut storage.store.identity_store,
+                            &pre_key_bundle,
+                            &mut csprng,
+                            None,
+                        ).await.unwrap();
+                    }
+
+                    let encrypted = message_encrypt(message.as_bytes(), &address, &mut storage.store.session_store, &mut storage.store.identity_store, None).await.unwrap();
+
+                    _self.storage.replace(Some(storage));
+
+                    Ok(JsValue::from_str(&base64::encode(&encrypted.serialize())))
+                },
+                Err(_) => Err(Error::new("Cannot encrypt message: storage is already borrowed").into())
             }
-
-            let encrypted = message_encrypt(message.as_bytes(), &address, &mut storage.store.session_store, &mut storage.store.identity_store, None).await.unwrap();
-
-            _self.storage.replace(Some(storage));
-
-            Ok(JsValue::from_str(&base64::encode(&encrypted.serialize())))
         };
 
         self.schedule_sync();
@@ -228,46 +243,51 @@ impl Protocol {
 
         let _self = self.inner.clone();
         let done = async move {
-            let mut storage = _self.storage.borrow_mut().take().unwrap();
+            match _self.storage.try_borrow_mut() {
+                Ok(mut _storage) => {
+                    let mut storage = _storage.take().unwrap();
 
-            let session_exists = storage.store.session_store.load_session(&address, None).await.unwrap();
+                    let session_exists = storage.store.session_store.load_session(&address, None).await.unwrap();
 
-            let bytes = base64::decode(&message).unwrap();
-            let ctext = match session_exists {
-                Some(_) => {
-                    // Prekey messages may be queued up, maybe fallback to prekey type
-                    match SignalMessage::try_from(&bytes[..]) {
-                        Ok(message) => CiphertextMessage::SignalMessage(message),
-                        Err(_) => CiphertextMessage::PreKeySignalMessage(PreKeySignalMessage::try_from(&bytes[..]).unwrap())
+                    let bytes = base64::decode(&message).unwrap();
+                    let ctext = match session_exists {
+                        Some(_) => {
+                            // Prekey messages may be queued up, maybe fallback to prekey type
+                            match SignalMessage::try_from(&bytes[..]) {
+                                Ok(message) => CiphertextMessage::SignalMessage(message),
+                                Err(_) => CiphertextMessage::PreKeySignalMessage(PreKeySignalMessage::try_from(&bytes[..]).unwrap())
+                            }
+                        },
+                        None => CiphertextMessage::PreKeySignalMessage(PreKeySignalMessage::try_from(&bytes[..]).unwrap()),
+                    };
+
+                    let maybe_decrypted = message_decrypt(
+                        &ctext,
+                        &address,
+                        &mut storage.store.session_store,
+                        &mut storage.store.identity_store,
+                        &mut storage.store.pre_key_store,
+                        &mut storage.store.signed_pre_key_store,
+                        &mut csprng,
+                        None,
+                    ).await;
+
+                    _self.storage.replace(Some(storage));
+
+                    match maybe_decrypted {
+                        Ok(decrypted) => {
+                            Ok(JsValue::from_str(&String::from_utf8(decrypted).unwrap()))
+                        },
+                        Err(SignalProtocolError::DuplicatedMessage(_, _)) => {
+                            Err(JsValue::from_str(&"DuplicatedMessageError".to_owned()))
+                        },
+                        Err(e) => {
+                            console::log_2(&"Error when decrypting message: ".into(), &e.to_string().into());
+                            Err(JsValue::from_str(&"MessageDecryptError".to_owned()))
+                        }
                     }
                 },
-                None => CiphertextMessage::PreKeySignalMessage(PreKeySignalMessage::try_from(&bytes[..]).unwrap()),
-            };
-
-            let maybe_decrypted = message_decrypt(
-                &ctext,
-                &address,
-                &mut storage.store.session_store,
-                &mut storage.store.identity_store,
-                &mut storage.store.pre_key_store,
-                &mut storage.store.signed_pre_key_store,
-                &mut csprng,
-                None,
-            ).await;
-
-            _self.storage.replace(Some(storage));
-
-            match maybe_decrypted {
-                Ok(decrypted) => {
-                    Ok(JsValue::from_str(&String::from_utf8(decrypted).unwrap()))
-                },
-                Err(SignalProtocolError::DuplicatedMessage(_, _)) => {
-                    Err(JsValue::from_str(&"DuplicatedMessageError".to_owned()))
-                },
-                Err(e) => {
-                    console::log_2(&"Error when decrypting message: ".into(), &e.to_string().into());
-                    Err(JsValue::from_str(&"MessageDecryptError".to_owned()))
-                }
+                Err(_) => Err(Error::new("Cannot decrypt message: storage is already borrowed").into())
             }
         };
 
@@ -277,12 +297,17 @@ impl Protocol {
     }
 
     pub fn sync(&self) -> Promise {
-        let store = self.inner.storage.borrow().clone().unwrap();
+        let maybe_store = self.inner.storage.try_borrow().map(|s| s.clone()).unwrap_or(None);
 
         wasm_bindgen_futures::future_to_promise(async move {
-            store.sync().await;
+            match maybe_store {
+                Some(store) => {
+                    store.sync().await;
 
-            Ok(JsValue::undefined())
+                    Ok(JsValue::undefined())
+                },
+                None => Err(Error::new("Cannot sync store: storage is mutably borrowed").into())
+            }
         })
     }
 
@@ -290,23 +315,25 @@ impl Protocol {
         let window = web_sys::window().unwrap();
 
         // Only create a timeout callback when there is no handle to an existing one
-        if self.inner.timeout.borrow().is_none() {
+        if self.inner.timeout.try_borrow().map(|t| t.is_none()).unwrap_or(false) {
             let _self = self.inner.clone();
             let f = Closure::wrap(Box::new(move || {
-                let storage = _self.storage.borrow().clone().unwrap();
+                match _self.storage.try_borrow().map(|s| s.clone().unwrap()) {
+                    Ok(storage) => {
+                        // Unset timeout "lock"
+                        _self.timeout.try_borrow_mut().map(|mut t| t.take()).ok();
 
-                // Unset timeout "lock"
-                _self.timeout.borrow_mut().take();
+                        let _obj: &js_sys::Object = wasm_bindgen_futures::future_to_promise(async move {
+                            storage.sync().await;
 
-                let _obj: &js_sys::Object = wasm_bindgen_futures::future_to_promise(async move {
-                    storage.sync().await;
-
-                    Ok(JsValue::undefined())
-                }).as_ref();
-
+                            Ok(JsValue::undefined())
+                        }).as_ref();
+                    },
+                    Err(_) => {}
+                };
             }) as Box<dyn FnMut()>);
             let handle = window.set_timeout_with_callback_and_timeout_and_arguments_0(&f.as_ref().unchecked_ref(), 3_000).unwrap();
-            self.inner.timeout.borrow_mut().replace(handle);
+            self.inner.timeout.try_borrow_mut().map(|mut t| t.replace(handle)).ok();
 
             // TODO: this leaks memory
             f.forget();
