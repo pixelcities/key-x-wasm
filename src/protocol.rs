@@ -19,7 +19,8 @@ use crate::utils::*;
 
 pub struct ProtocolInner {
     storage: RefCell<Option<SyncableStore>>,
-    timeout: RefCell<Option<i32>>
+    timeout: RefCell<Option<i32>>,
+    message_ids: RefCell<Vec<String>>
 }
 
 #[wasm_bindgen]
@@ -96,7 +97,8 @@ impl Protocol {
         Protocol {
             inner: Arc::new(ProtocolInner {
                 storage: RefCell::new(None),
-                timeout: RefCell::new(None)
+                timeout: RefCell::new(None),
+                message_ids: RefCell::new(Vec::new())
             })
         }
     }
@@ -140,7 +142,7 @@ impl Protocol {
             let identity_key = base64::encode(storage.store.identity_store.get_identity_key_pair(None).await.unwrap().public_key().serialize());
 
             // Save state
-            storage.sync().await;
+            storage.sync(None).await;
 
             _self.storage.replace(Some(storage));
 
@@ -157,7 +159,7 @@ impl Protocol {
             match _self.storage.try_borrow_mut().map(|mut s| s.take().unwrap()) {
                 Ok(mut storage) => {
                     gen_pre_key_bundles(&mut storage).await;
-                    storage.sync().await;
+                    storage.sync(None).await;
 
                     _self.storage.replace(Some(storage));
 
@@ -233,12 +235,17 @@ impl Protocol {
         wasm_bindgen_futures::future_to_promise(done)
     }
 
-    pub fn decrypt(&self, user_id: String, message: String) -> Promise {
+    pub fn decrypt(&self, user_id: String, message_id: String, message: String) -> Promise {
         let mut csprng = OsRng;
         let address = ProtocolAddress::new(user_id.clone(), 1);
 
         let _self = self.inner.clone();
         let done = async move {
+            let maybe_message_ids = _self.message_ids.try_borrow_mut();
+            if maybe_message_ids.is_ok() && !message_id.is_empty() {
+                maybe_message_ids.unwrap().push(message_id);
+            }
+
             match _self.storage.try_borrow_mut().map(|mut s| s.take().unwrap()) {
                 Ok(mut storage) => {
                     let session_exists = storage.store.session_store.load_session(&address, None).await.unwrap();
@@ -293,10 +300,20 @@ impl Protocol {
     pub fn sync(&self) -> Promise {
         let maybe_store = self.inner.storage.try_borrow().map(|s| s.clone()).unwrap_or(None);
 
+        let maybe_message_ids = self.inner.message_ids.try_borrow_mut();
+        let message_ids = if maybe_message_ids.is_ok() {
+            let mut message_ids = maybe_message_ids.unwrap();
+            let res = message_ids.clone();
+            message_ids.clear();
+            res
+        } else {
+            vec![]
+        };
+
         wasm_bindgen_futures::future_to_promise(async move {
             match maybe_store {
                 Some(store) => {
-                    store.sync().await;
+                    store.sync(Some(message_ids)).await;
 
                     Ok(JsValue::undefined())
                 },
@@ -312,13 +329,23 @@ impl Protocol {
         if self.inner.timeout.try_borrow().map(|t| t.is_none()).unwrap_or(false) {
             let _self = self.inner.clone();
             let f = Closure::wrap(Box::new(move || {
+                let maybe_message_ids = _self.message_ids.try_borrow_mut();
+                let message_ids = if maybe_message_ids.is_ok() {
+                    let mut message_ids = maybe_message_ids.unwrap();
+                    let res = message_ids.clone();
+                    message_ids.clear();
+                    res
+                } else {
+                    vec![]
+                };
+
                 match _self.storage.try_borrow().map(|s| s.clone().unwrap()) {
                     Ok(storage) => {
                         // Unset timeout "lock"
                         _self.timeout.try_borrow_mut().map(|mut t| t.take()).ok();
 
                         let _obj: &js_sys::Object = wasm_bindgen_futures::future_to_promise(async move {
-                            storage.sync().await;
+                            storage.sync(Some(message_ids)).await;
 
                             Ok(JsValue::undefined())
                         }).as_ref();

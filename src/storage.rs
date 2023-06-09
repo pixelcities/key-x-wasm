@@ -9,6 +9,7 @@ use libsignal_protocol::*;
 use libsignal_protocol::SessionStore;
 use uuid::Uuid;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use crate::utils::*;
 use crate::crypto::*;
@@ -208,12 +209,15 @@ impl SyncableStore {
      * the state is restored to get all the chains back in order. This assumes that we don't
      * lose messages and are willing to replay a ton of them.
      */
-    pub async fn sync(&self) -> () {
+    pub async fn sync(&self, message_ids: Option<Vec<String>>) -> () {
         let bytes = self.serialize();
         let cstate = encrypt_custom(&base64::encode(&bytes), &self.secret_key[..]);
-        let payload = format!("{{\"state\": \"{}\" }}", cstate);
+        let payload = json!({
+            "state": cstate,
+            "message_ids": message_ids.unwrap_or(vec![])
+        });
 
-        request("PUT".to_string(), format!("{}/protocol/sync", self.api_basepath), Some(payload)).await;
+        request("PUT".to_string(), format!("{}/protocol/sync", self.api_basepath), Some(payload.to_string())).await;
     }
 }
 
