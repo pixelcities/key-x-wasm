@@ -297,6 +297,64 @@ impl Protocol {
         wasm_bindgen_futures::future_to_promise(done)
     }
 
+    pub fn sign(&self, message: String) -> Promise {
+        let mut csprng = OsRng;
+        let maybe_store = self.inner.storage.try_borrow().map(|s| s.clone()).unwrap_or(None);
+
+        wasm_bindgen_futures::future_to_promise(async move {
+            match maybe_store {
+                Some(storage) => {
+                    let priv_key = storage.store.identity_store.get_identity_key_pair(None).await.unwrap().private_key().clone();
+                    let signature = priv_key.calculate_signature(message.as_bytes(), &mut csprng).unwrap();
+
+                    Ok(hex::encode(signature).into())
+                },
+                None => Err(Error::new("Cannot calculate signature: storage is mutably borrowed").into())
+            }
+        })
+    }
+
+    pub fn verify(&self, message: String, signature: String, user_id: JsValue) -> Promise {
+        let maybe_store = self.inner.storage.try_borrow().map(|s| s.clone()).unwrap_or(None);
+
+        // Optionally give the user id to verify against. When verifiying our own signature,
+        // this should be left empty.
+        let address = if !user_id.is_undefined() && user_id.is_string() {
+            Some(ProtocolAddress::new(user_id.as_string().unwrap(), 1))
+        } else {
+            None
+        };
+
+        wasm_bindgen_futures::future_to_promise(async move {
+            match maybe_store {
+                Some(storage) => {
+                    let maybe_pub_key = match address {
+                        Some(their_address) => {
+                            storage.store.identity_store.get_identity(&their_address, None).await.unwrap().map(|x| x.public_key().clone())
+                        },
+                        None => Some(storage.store.identity_store.get_identity_key_pair(None).await.unwrap().public_key().clone())
+                    };
+
+                    match maybe_pub_key {
+                        Some(pub_key) => {
+                            match hex::decode(signature) {
+                                Ok(sig_bytes) => {
+                                    match pub_key.verify_signature(message.as_bytes(), &sig_bytes) {
+                                        Ok(true) => Ok(true.into()),
+                                        _ => Ok(false.into())
+                                    }
+                                },
+                                Err(_) => Err(Error::new("Signature is not in hex").into())
+                            }
+                        },
+                        None => Err(Error::new("Cannot find public key for this user").into())
+                    }
+                },
+                None => Err(Error::new("Cannot verify signature: storage is mutably borrowed").into())
+            }
+        })
+    }
+
     pub fn sync(&self) -> Promise {
         let maybe_store = self.inner.storage.try_borrow().map(|s| s.clone()).unwrap_or(None);
 
