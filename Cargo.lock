@@ -484,7 +484,7 @@ dependencies = [
 
 [[package]]
 name = "key-x-wasm"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "aes-gcm-siv",
  "argon2",
